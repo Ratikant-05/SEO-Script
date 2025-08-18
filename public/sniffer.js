@@ -70,8 +70,17 @@
 
         console.log('SEO Sniffer: Detected project path:', projectPath);
 
+        // Determine API endpoint based on environment
+        const isProduction = !window.location.href.includes('localhost') && 
+                            !window.location.href.includes('127.0.0.1') && 
+                            !window.location.href.startsWith('file://');
+        
+        const apiEndpoint = isProduction ? 
+          'https://seo-script-hqz1.onrender.com/api/sites' : 
+          'http://localhost:4444/api/sites';
+
         // Request auto-injection from backend
-        const response = await fetch(`http://localhost:4444/api/sites/${siteId}/auto-inject`, {
+        const response = await fetch(`${apiEndpoint}/${siteId}/auto-inject`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -218,8 +227,17 @@
 
         console.log('SEO Sniffer: Detected project path for crawl:', projectPath);
 
+        // Determine API endpoint based on environment
+        const isProduction = !window.location.href.includes('localhost') && 
+                            !window.location.href.includes('127.0.0.1') && 
+                            !window.location.href.startsWith('file://');
+        
+        const apiEndpoint = isProduction ? 
+          'https://seo-script-hqz1.onrender.com/api/sites' : 
+          'http://localhost:4444/api/sites';
+
         // Request crawling from backend
-        const response = await fetch(`http://localhost:4444/api/sites/${siteId}/crawl`, {
+        const response = await fetch(`${apiEndpoint}/${siteId}/crawl`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -435,7 +453,7 @@
                         !window.location.href.startsWith('file://');
     
     const apiEndpoint = isProduction ? 
-      'https://your-seo-backend.herokuapp.com/collect' : 
+      'https://seo-script-hqz1.onrender.com/collect' : 
       'http://localhost:4444/collect';
 
     // Use fetch without keepalive to avoid tab switch issues

@@ -70,7 +70,12 @@ router.post('/api/sites', async (req, res) => {
     // Check if domain is already registered
     const existingSite = await Site.findOne({ domain });
     if (existingSite) {
-      const installSnippet = `<script defer src="http://localhost:4444/sniffer.js" data-site-id="${existingSite.siteId}"></script>`;
+      // Generate script URL based on environment
+      const isProduction = req.get('host') !== 'localhost:4444' && !req.get('host').includes('127.0.0.1');
+      const scriptSrc = isProduction ? 
+        `https://seo-script-hqz1.onrender.com/sniffer.js` : 
+        `http://localhost:4444/sniffer.js`;
+      const installSnippet = `<script defer src="${scriptSrc}" data-site-id="${existingSite.siteId}"></script>`;
       
       return res.status(200).json({
         siteId: existingSite.siteId,
@@ -93,7 +98,12 @@ router.post('/api/sites', async (req, res) => {
 
     await site.save();
 
-    const installSnippet = `<script defer src="http://localhost:4444/sniffer.js" data-site-id="${siteId}"></script>`;
+    // Generate script URL based on environment
+    const isProduction = req.get('host') !== 'localhost:4444' && !req.get('host').includes('127.0.0.1');
+    const scriptSrc = isProduction ? 
+      `https://seo-script-hqz1.onrender.com/sniffer.js` : 
+      `http://localhost:4444/sniffer.js`;
+    const installSnippet = `<script defer src="${scriptSrc}" data-site-id="${siteId}"></script>`;
 
     res.status(201).json({
       siteId,
@@ -388,7 +398,7 @@ router.post('/api/sites/:siteId/auto-inject', async (req, res) => {
     // Generate script tag with environment detection
     const isProduction = req.get('host') !== 'localhost:4444' && !req.get('host').includes('127.0.0.1');
     const scriptSrc = isProduction ? 
-      `https://your-seo-backend.herokuapp.com/sniffer.js` : 
+      `https://seo-script-hqz1.onrender.com/sniffer.js` : 
       `http://localhost:4444/sniffer.js`;
     
     const scriptTag = `<script defer src="${scriptSrc}" data-site-id="${siteId}"></script>`;
