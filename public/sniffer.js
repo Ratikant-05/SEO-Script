@@ -842,25 +842,37 @@
             const selector = key.replace('alt_', '');
             const element = document.querySelector(selector);
             if (element) element.setAttribute('alt', originalValue || '');
-          } else if (key.startsWith('content_')) {
-            const selector = key.replace('content_', '');
-            const element = document.querySelector(selector);
-            if (element) element.textContent = originalValue;
-          } else if (key.startsWith('link_')) {
-            const selector = key.replace('link_', '');
-            const element = document.querySelector(selector);
-            if (element) element.textContent = originalValue;
+          } else if (key === 'meta_description') {
+            let metaDesc = document.querySelector('meta[name="description"]');
+            if (metaDesc) {
+              metaDesc.setAttribute('content', originalValue);
+            }
+          } else if (key.startsWith('heading_')) {
+            const level = key.split('_')[1];
+            const heading = document.querySelector(`h${level}`);
+            if (heading) {
+              heading.textContent = originalValue;
+            }
+          } else if (key === 'custom_h1') {
+            const h1Element = document.querySelector('h1');
+            if (h1Element) {
+              h1Element.textContent = originalValue;
+              // Remove from localStorage
+              const persistenceKey = `seo_h1_${window.location.pathname}`;
+              localStorage.removeItem(persistenceKey);
+            }
           }
         });
         
         this.originalValues.clear();
         sessionStorage.removeItem(`seo_optimizations_${siteId}`);
-        this.showOptimizationNotification('All SEO optimizations reverted', 'info');
+        this.showOptimizationNotification('All optimizations reverted', 'success');
         
       } catch (error) {
         console.error('SEO Optimizer: Failed to revert optimizations', error);
       }
     },
+{{ ... }}
     
     // Store optimization in session storage
     storeOptimization(instruction) {
@@ -1129,6 +1141,15 @@
             currentH1.textContent = data.optimizedH1;
             this.showOptimizationNotification(`H1 updated: "${data.optimizedH1}"`, 'success');
             
+            // Save to localStorage for persistence across page refreshes
+            const persistenceKey = `seo_h1_${window.location.pathname}`;
+            localStorage.setItem(persistenceKey, JSON.stringify({
+              optimizedH1: data.optimizedH1,
+              originalH1: currentH1Text,
+              timestamp: Date.now(),
+              userRequest: userRequest
+            }));
+            
             // Store the optimization
             this.storeOptimization({
               type: 'heading',
@@ -1162,13 +1183,60 @@
   // Make seoOptimizer globally accessible
   window.seoOptimizer = seoOptimizer;
   
+  // Restore persisted H1 changes on page load
+  function restorePersistedH1() {
+    const persistenceKey = `seo_h1_${window.location.pathname}`;
+    const savedData = localStorage.getItem(persistenceKey);
+    
+    console.log('SEO: Checking for persisted H1 data...', { persistenceKey, savedData });
+    
+    if (savedData) {
+      try {
+        const { optimizedH1, originalH1, timestamp } = JSON.parse(savedData);
+        
+        console.log('SEO: Found persisted H1 data:', { optimizedH1, originalH1, timestamp });
+        
+        // Check if data is not too old (24 hours)
+        if (Date.now() - timestamp < 24 * 60 * 60 * 1000) {
+          const h1Element = document.querySelector('h1');
+          const currentH1Text = h1Element ? h1Element.textContent.trim() : null;
+          
+          console.log('SEO: Current H1 vs Original:', { currentH1Text, originalH1 });
+          
+          if (h1Element) {
+            // Apply optimized H1 regardless of current content to ensure it works
+            h1Element.textContent = optimizedH1;
+            seoOptimizer.originalValues.set('custom_h1', originalH1);
+            console.log('SEO: H1 restored successfully to:', optimizedH1);
+          } else {
+            console.log('SEO: No H1 element found on page');
+          }
+        } else {
+          console.log('SEO: Persisted H1 data expired, removing...');
+          localStorage.removeItem(persistenceKey);
+        }
+      } catch (error) {
+        console.error('SEO: Error restoring H1:', error);
+        localStorage.removeItem(persistenceKey);
+      }
+    } else {
+      console.log('SEO: No persisted H1 data found');
+    }
+  }
+  
   // Create control panel when page loads
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
-      setTimeout(() => seoOptimizer.createControlPanel(), 1000);
+      setTimeout(() => {
+        restorePersistedH1();
+        seoOptimizer.createControlPanel();
+      }, 500);
     });
   } else {
-    setTimeout(() => seoOptimizer.createControlPanel(), 1000);
+    setTimeout(() => {
+      restorePersistedH1();
+      seoOptimizer.createControlPanel();
+    }, 500);
   }
 
 })();
