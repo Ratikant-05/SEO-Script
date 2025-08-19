@@ -723,13 +723,3 @@ export const applySuggestion = async (req, res) => {
     res.status(500).json({ error: 'Failed to apply suggestion' });
   }
 };
-
-export {
-  collectSeoData,
-  registerSite,
-  getSitePages,
-  autoInjectScript,
-  crawlProject,
-  applySuggestion,
-  analyzeSeoData
-};
