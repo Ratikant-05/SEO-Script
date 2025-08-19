@@ -975,7 +975,28 @@
           border-radius: 6px;
           cursor: pointer;
           font-size: 12px;
+          margin-bottom: 8px;
         ">Revert Changes</button>
+        <div style="margin-bottom: 10px;">
+          <input id="custom-h1-input" type="text" placeholder="Tell Gemini how to update H1..." style="
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-bottom: 6px;
+          ">
+          <button id="update-h1-btn" style="
+            width: 100%;
+            padding: 6px 12px;
+            background: #9C27B0;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+          ">Update H1 with Gemini</button>
+        </div>
         <div id="seo-suggestions-container" style="margin-top: 10px; max-height: 300px; overflow-y: auto;"></div>
       `;
       
@@ -984,6 +1005,7 @@
       // Add event listeners
       document.getElementById('seo-get-suggestions').addEventListener('click', this.getSeoSuggestions.bind(this));
       document.getElementById('seo-revert-changes').addEventListener('click', this.revertOptimizations.bind(this));
+      document.getElementById('update-h1-btn').addEventListener('click', this.updateH1WithGemini.bind(this));
     },
     
     // Get SEO suggestions from server
@@ -1064,6 +1086,76 @@
         
         container.appendChild(suggestionDiv);
       });
+    },
+    
+    // Update H1 with custom Gemini request
+    async updateH1WithGemini() {
+      const input = document.getElementById('custom-h1-input');
+      const button = document.getElementById('update-h1-btn');
+      const userRequest = input.value.trim();
+      
+      if (!userRequest) {
+        this.showOptimizationNotification('Please enter your H1 update request', 'error');
+        return;
+      }
+      
+      button.textContent = 'Processing...';
+      button.disabled = true;
+      
+      try {
+        // Get current H1 content
+        const currentH1 = document.querySelector('h1');
+        const currentH1Text = currentH1 ? currentH1.textContent.trim() : 'No H1 found';
+        
+        const response = await fetch(`https://seo-script-hqz1.onrender.com/api/sites/${siteId}/custom-h1`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            userRequest,
+            currentH1: currentH1Text,
+            pageUrl: window.location.href,
+            pageTitle: document.title
+          })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.optimizedH1) {
+          // Apply the optimized H1
+          if (currentH1) {
+            this.originalValues.set('custom_h1', currentH1.textContent);
+            currentH1.textContent = data.optimizedH1;
+            this.showOptimizationNotification(`H1 updated: "${data.optimizedH1}"`, 'success');
+            
+            // Store the optimization
+            this.storeOptimization({
+              type: 'heading',
+              element: 'h1',
+              domAction: 'replace',
+              currentValue: currentH1Text,
+              suggestedValue: data.optimizedH1,
+              seoImpact: data.explanation || 'Custom H1 optimization',
+              userRequest: userRequest
+            });
+          } else {
+            this.showOptimizationNotification('No H1 element found on page', 'error');
+          }
+          
+          // Clear input
+          input.value = '';
+        } else {
+          this.showOptimizationNotification(data.error || 'Failed to optimize H1', 'error');
+        }
+        
+      } catch (error) {
+        console.error('Failed to update H1:', error);
+        this.showOptimizationNotification('Network error updating H1', 'error');
+      } finally {
+        button.textContent = 'Update H1 with Gemini';
+        button.disabled = false;
+      }
     }
   };
   

@@ -1,7 +1,15 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import {collectSeoData,registerSite,getSitePages,autoInjectScript,crawlProject,applySuggestion,analyzeSeoData} from '../Controllers/seoController.js';
+import { 
+  registerSite, 
+  collectSeoData, 
+  getSitePages, 
+  getSeoSuggestions, 
+  crawlSitePages,
+  prepareDomOptimization,
+  customH1Optimization
+} from '../Controllers/seoController.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,6 +41,12 @@ router.post('/api/sites/:siteId/auto-inject', autoInjectScript);
 router.post('/api/sites/:siteId/apply-suggestion', applySuggestion);
 
 // Crawl all HTML files in project and extract SEO data
-router.post('/api/sites/:siteId/crawl', crawlProject);
+router.post('/api/sites/:siteId/crawl', crawlSitePages);
+
+// Prepare DOM optimization
+router.post('/api/sites/:siteId/prepare-optimization', prepareDomOptimization);
+
+// Custom H1 optimization with Gemini
+router.post('/api/sites/:siteId/custom-h1', customH1Optimization);
 
 export default router;

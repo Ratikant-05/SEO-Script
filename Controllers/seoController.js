@@ -668,3 +668,93 @@ export const applySuggestion = async (req, res) => {
     res.status(500).json({ error: 'Failed to prepare optimization' });
   }
 };
+
+// Custom H1 optimization with Gemini
+export const customH1Optimization = async (req, res) => {
+  try {
+    const { siteId } = req.params;
+    const { userRequest, currentH1, pageUrl, pageTitle } = req.body;
+
+    if (!userRequest) {
+      return res.status(400).json({ error: 'User request is required' });
+    }
+
+    // Verify site exists
+    const site = await Site.findOne({ siteId });
+    if (!site) {
+      return res.status(404).json({ error: 'Site not found' });
+    }
+
+    // Create Gemini prompt for custom H1 optimization
+    const geminiPrompt = `
+You are an expert SEO consultant. A user wants to optimize their H1 heading based on their specific request.
+
+CURRENT PAGE CONTEXT:
+- Page URL: ${pageUrl}
+- Page Title: ${pageTitle}
+- Current H1: "${currentH1}"
+- Site: ${site.name} (${site.domain})
+
+USER REQUEST: "${userRequest}"
+
+Based on the user's request, create an SEO-optimized H1 that:
+1. Addresses the user's specific requirements
+2. Follows SEO best practices (50-60 characters ideal)
+3. Includes relevant keywords
+4. Is compelling and click-worthy
+5. Matches the page content context
+
+Respond with ONLY a JSON object in this exact format:
+{
+  "optimizedH1": "Your optimized H1 text here",
+  "explanation": "Brief explanation of why this H1 is better for SEO and how it addresses the user's request",
+  "seoScore": "estimated SEO improvement score 1-10",
+  "keywords": ["key", "words", "included"]
+}
+
+Make the H1 compelling, SEO-friendly, and exactly what the user requested.`;
+
+    // Call Gemini API
+    const geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{
+            text: geminiPrompt
+          }]
+        }]
+      })
+    });
+
+    if (!geminiResponse.ok) {
+      throw new Error(`Gemini API error: ${geminiResponse.status}`);
+    }
+
+    const geminiData = await geminiResponse.json();
+    const responseText = geminiData.candidates[0].content.parts[0].text;
+    
+    // Parse JSON from Gemini response
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error('Could not parse H1 optimization from Gemini response');
+    }
+
+    const optimization = JSON.parse(jsonMatch[0]);
+
+    res.json({
+      optimizedH1: optimization.optimizedH1,
+      explanation: optimization.explanation,
+      seoScore: optimization.seoScore,
+      keywords: optimization.keywords,
+      userRequest,
+      originalH1: currentH1
+    });
+
+  } catch (error) {
+    console.error('Error optimizing H1:', error);
+    res.status(500).json({ error: 'Failed to optimize H1' });
+  }
+};
