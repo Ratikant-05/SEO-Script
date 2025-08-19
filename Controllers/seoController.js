@@ -524,69 +524,62 @@ export const analyzeSeoData = async (req, res) => {
     // Prepare data for Gemini analysis
     const seoData = latestSnapshot.data;
     const analysisPrompt = `
-Analyze this SEO data and provide specific, actionable suggestions to improve SEO:
+You are an expert SEO consultant. Analyze this website's SEO data and provide specific, actionable suggestions for real-time DOM optimization.
 
+WEBSITE ANALYSIS:
 Page URL: ${latestSnapshot.url}
 Site: ${site.name} (${site.domain})
 
-HEADINGS:
-${seoData.headings.map(h => `${h.tag.toUpperCase()}: ${h.text}`).join('\n')}
+CURRENT SEO ELEMENTS:
+Title: ${seoData.title || 'MISSING TITLE'}
 
-META DESCRIPTION: ${seoData.metaDescription || 'MISSING'}
+HEADINGS STRUCTURE:
+${seoData.headings.map(h => `${h.tag.toUpperCase()}: "${h.text}"`).join('\n')}
+
+META DESCRIPTION: ${seoData.metaDescription || 'MISSING - Critical SEO issue!'}
 
 META TAGS:
-${seoData.metaTags.map(m => `${m.name || m.property}: ${m.content}`).join('\n')}
+${seoData.metaTags.map(m => `${m.name || m.property}: "${m.content}"`).join('\n')}
 
-IMAGES: ${seoData.images.length} images found
-${seoData.images.slice(0, 5).map(img => `- ${img.alt || 'NO ALT TEXT'} (${img.src})`).join('\n')}
+IMAGES (${seoData.images.length} total):
+${seoData.images.map(img => `- Src: ${img.src} | Alt: ${img.alt || 'MISSING ALT TEXT - SEO issue!'}`).join('\n')}
 
-LINKS: ${seoData.anchors.length} links found
+LINKS (${seoData.anchors.length} total):
+${seoData.anchors.slice(0, 10).map(a => `- "${a.text || 'NO ANCHOR TEXT'}" -> ${a.href}`).join('\n')}
 
-Please provide suggestions in this exact JSON format:
+CONTENT ANALYSIS:
+Paragraphs: ${seoData.paragraphs?.length || 0}
+Content Divs: ${seoData.divs?.length || 0}
+
+Provide detailed SEO optimization suggestions that can be applied via DOM manipulation. Focus on:
+1. Title optimization for search engines
+2. Meta description improvements 
+3. Heading structure optimization (H1 should be unique, H2-H6 hierarchy)
+4. Image alt text for accessibility and SEO
+5. Content improvements for better keyword targeting
+6. Internal linking optimization
+
+Return suggestions in this exact JSON format:
 {
+  "seoScore": "score out of 100",
+  "criticalIssues": ["list of critical SEO problems"],
   "suggestions": [
     {
-      "type": "title",
-      "priority": "high|medium|low",
-      "issue": "Brief description of the issue",
-      "suggestion": "Specific suggestion text",
-      "currentValue": "current title text",
-      "suggestedValue": "improved title text",
-      "element": "title"
-    },
-    {
-      "type": "meta_description", 
-      "priority": "high|medium|low",
-      "issue": "Brief description",
-      "suggestion": "Specific suggestion",
-      "currentValue": "current meta description",
-      "suggestedValue": "improved meta description",
-      "element": "meta[name='description']"
-    },
-    {
-      "type": "heading",
-      "priority": "high|medium|low", 
-      "issue": "Brief description",
-      "suggestion": "Specific suggestion",
-      "currentValue": "current heading text",
-      "suggestedValue": "improved heading text",
-      "element": "h1|h2|h3|h4|h5|h6",
-      "selector": "specific CSS selector if needed"
-    },
-    {
-      "type": "alt_text",
-      "priority": "high|medium|low",
-      "issue": "Brief description", 
-      "suggestion": "Specific suggestion",
-      "currentValue": "current alt text or empty",
-      "suggestedValue": "improved alt text",
-      "element": "img",
-      "selector": "img[src='specific-image-url']"
+      "type": "title|meta_description|heading|alt_text|content|link",
+      "priority": "critical|high|medium|low",
+      "issue": "Detailed explanation of the SEO issue",
+      "suggestion": "Specific actionable recommendation",
+      "currentValue": "current content",
+      "suggestedValue": "SEO-optimized content",
+      "element": "CSS selector for target element",
+      "domAction": "replace|append|setAttribute|addClass",
+      "seoImpact": "explanation of SEO benefit",
+      "keywords": ["relevant", "keywords", "for", "optimization"]
     }
   ]
 }
 
-Focus on the most impactful SEO improvements. Limit to 8 suggestions maximum.`;
+Provide 10-15 comprehensive suggestions covering all major SEO aspects. Be specific about DOM selectors and optimization strategies.`;
 
     // Call Gemini API
     const geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, {
@@ -628,6 +621,8 @@ Focus on the most impactful SEO improvements. Limit to 8 suggestions maximum.`;
         url: latestSnapshot.url,
         createdAt: latestSnapshot.createdAt
       },
+      seoScore: suggestions.seoScore || 'Not calculated',
+      criticalIssues: suggestions.criticalIssues || [],
       suggestions: suggestions.suggestions
     });
 
@@ -637,14 +632,14 @@ Focus on the most impactful SEO improvements. Limit to 8 suggestions maximum.`;
   }
 };
 
-// Apply SEO suggestion to actual file
+// Apply DOM-based SEO optimization (sends commands to client)
 export const applySuggestion = async (req, res) => {
   try {
     const { siteId } = req.params;
-    const { suggestion, filePath } = req.body;
+    const { suggestion } = req.body;
 
-    if (!suggestion || !filePath) {
-      return res.status(400).json({ error: 'Suggestion and file path are required' });
+    if (!suggestion) {
+      return res.status(400).json({ error: 'Suggestion is required' });
     }
 
     // Verify site exists
@@ -653,73 +648,23 @@ export const applySuggestion = async (req, res) => {
       return res.status(404).json({ error: 'Site not found' });
     }
 
-    // Read the HTML file
-    const fullPath = path.resolve(filePath);
-    let htmlContent = await fs.readFile(fullPath, 'utf-8');
-
-    // Apply suggestion based on type
-    switch (suggestion.type) {
-      case 'title':
-        htmlContent = htmlContent.replace(
-          /<title>([^<]*)<\/title>/i,
-          `<title>${suggestion.suggestedValue}</title>`
-        );
-        break;
-
-      case 'meta_description':
-        if (suggestion.currentValue) {
-          // Update existing meta description
-          htmlContent = htmlContent.replace(
-            /<meta\s+name=["']description["']\s+content=["'][^"']*["'][^>]*>/i,
-            `<meta name="description" content="${suggestion.suggestedValue}">`
-          );
-        } else {
-          // Add new meta description
-          htmlContent = htmlContent.replace(
-            /(<head[^>]*>)/i,
-            `$1\n    <meta name="description" content="${suggestion.suggestedValue}">`
-          );
-        }
-        break;
-
-      case 'heading':
-        if (suggestion.selector) {
-          // Use specific selector if provided
-          const regex = new RegExp(`(<${suggestion.element}[^>]*>)([^<]*)(</h[1-6]>)`, 'i');
-          htmlContent = htmlContent.replace(regex, `$1${suggestion.suggestedValue}$3`);
-        } else {
-          // Replace first occurrence of the heading type
-          const regex = new RegExp(`(<${suggestion.element}[^>]*>)([^<]*)(</h[1-6]>)`, 'i');
-          htmlContent = htmlContent.replace(regex, `$1${suggestion.suggestedValue}$3`);
-        }
-        break;
-
-      case 'alt_text':
-        if (suggestion.selector) {
-          // Update specific image
-          const imgSrc = suggestion.selector.match(/img\[src=['"]([^'"]*)['"]\]/)?.[1];
-          if (imgSrc) {
-            const regex = new RegExp(`(<img[^>]*src=["']${imgSrc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["'][^>]*?)(?:alt=["'][^"']*["'])?([^>]*>)`, 'i');
-            htmlContent = htmlContent.replace(regex, `$1alt="${suggestion.suggestedValue}"$2`);
-          }
-        }
-        break;
-
-      default:
-        return res.status(400).json({ error: 'Unsupported suggestion type' });
-    }
-
-    // Write the updated content back to file
-    await fs.writeFile(fullPath, htmlContent, 'utf-8');
-
+    // Return DOM manipulation instructions for the client
     res.json({
-      message: 'Suggestion applied successfully',
-      type: suggestion.type,
-      appliedValue: suggestion.suggestedValue
+      message: 'DOM optimization instructions ready',
+      siteId,
+      domInstructions: {
+        type: suggestion.type,
+        element: suggestion.element,
+        domAction: suggestion.domAction,
+        currentValue: suggestion.currentValue,
+        suggestedValue: suggestion.suggestedValue,
+        seoImpact: suggestion.seoImpact,
+        keywords: suggestion.keywords
+      }
     });
 
   } catch (error) {
-    console.error('Error applying suggestion:', error);
-    res.status(500).json({ error: 'Failed to apply suggestion' });
+    console.error('Error preparing DOM optimization:', error);
+    res.status(500).json({ error: 'Failed to prepare optimization' });
   }
 };

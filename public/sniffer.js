@@ -371,9 +371,10 @@
     waitForReactDetection();
   }
 
-  // Extract SEO data from DOM
+  // Extract SEO data from the page
   function extractSeoData() {
     const data = {
+      title: document.title || '',
       headings: [],
       anchors: [],
       metaDescription: '',
@@ -726,6 +727,356 @@
   // Check if data was already sent for this page in this session
   function wasDataSent() {
     return sessionStorage.getItem(`seo-sniffer-sent-${siteId}`) === window.location.href;
+  }
+
+  // DOM-based SEO optimization functions
+  const seoOptimizer = {
+    // Store original values for reverting changes
+    originalValues: new Map(),
+    
+    // Apply SEO optimization to DOM
+    applyOptimization(instruction) {
+      const { type, element, domAction, currentValue, suggestedValue } = instruction;
+      
+      try {
+        switch (type) {
+          case 'title':
+            this.originalValues.set('title', document.title);
+            document.title = suggestedValue;
+            this.showOptimizationNotification('Title optimized for SEO', 'success');
+            break;
+            
+          case 'meta_description':
+            let metaDesc = document.querySelector('meta[name="description"]');
+            if (metaDesc) {
+              this.originalValues.set('meta_description', metaDesc.getAttribute('content'));
+              metaDesc.setAttribute('content', suggestedValue);
+            } else {
+              // Create new meta description
+              metaDesc = document.createElement('meta');
+              metaDesc.setAttribute('name', 'description');
+              metaDesc.setAttribute('content', suggestedValue);
+              document.head.appendChild(metaDesc);
+              this.originalValues.set('meta_description', null);
+            }
+            this.showOptimizationNotification('Meta description optimized', 'success');
+            break;
+            
+          case 'heading':
+            const headingElement = document.querySelector(element);
+            if (headingElement) {
+              this.originalValues.set(`heading_${element}`, headingElement.textContent);
+              headingElement.textContent = suggestedValue;
+              this.showOptimizationNotification(`${element.toUpperCase()} heading optimized`, 'success');
+            }
+            break;
+            
+          case 'alt_text':
+            const imgElement = document.querySelector(element);
+            if (imgElement) {
+              this.originalValues.set(`alt_${element}`, imgElement.getAttribute('alt'));
+              imgElement.setAttribute('alt', suggestedValue);
+              this.showOptimizationNotification('Image alt text optimized', 'success');
+            }
+            break;
+            
+          case 'content':
+            const contentElement = document.querySelector(element);
+            if (contentElement) {
+              this.originalValues.set(`content_${element}`, contentElement.textContent);
+              if (domAction === 'replace') {
+                contentElement.textContent = suggestedValue;
+              } else if (domAction === 'append') {
+                contentElement.textContent += ' ' + suggestedValue;
+              }
+              this.showOptimizationNotification('Content optimized for SEO', 'success');
+            }
+            break;
+            
+          case 'link':
+            const linkElement = document.querySelector(element);
+            if (linkElement) {
+              this.originalValues.set(`link_${element}`, linkElement.textContent);
+              linkElement.textContent = suggestedValue;
+              this.showOptimizationNotification('Link text optimized', 'success');
+            }
+            break;
+        }
+        
+        // Store optimization in session for persistence
+        this.storeOptimization(instruction);
+        
+      } catch (error) {
+        console.error('SEO Optimizer: Failed to apply optimization', error);
+        this.showOptimizationNotification('Failed to apply optimization', 'error');
+      }
+    },
+    
+    // Revert all optimizations
+    revertOptimizations() {
+      try {
+        // Revert title
+        if (this.originalValues.has('title')) {
+          document.title = this.originalValues.get('title');
+        }
+        
+        // Revert meta description
+        if (this.originalValues.has('meta_description')) {
+          const metaDesc = document.querySelector('meta[name="description"]');
+          const originalValue = this.originalValues.get('meta_description');
+          if (originalValue === null && metaDesc) {
+            // Remove if it was added
+            metaDesc.remove();
+          } else if (metaDesc && originalValue) {
+            metaDesc.setAttribute('content', originalValue);
+          }
+        }
+        
+        // Revert other elements
+        this.originalValues.forEach((originalValue, key) => {
+          if (key.startsWith('heading_')) {
+            const selector = key.replace('heading_', '');
+            const element = document.querySelector(selector);
+            if (element) element.textContent = originalValue;
+          } else if (key.startsWith('alt_')) {
+            const selector = key.replace('alt_', '');
+            const element = document.querySelector(selector);
+            if (element) element.setAttribute('alt', originalValue || '');
+          } else if (key.startsWith('content_')) {
+            const selector = key.replace('content_', '');
+            const element = document.querySelector(selector);
+            if (element) element.textContent = originalValue;
+          } else if (key.startsWith('link_')) {
+            const selector = key.replace('link_', '');
+            const element = document.querySelector(selector);
+            if (element) element.textContent = originalValue;
+          }
+        });
+        
+        this.originalValues.clear();
+        sessionStorage.removeItem(`seo_optimizations_${siteId}`);
+        this.showOptimizationNotification('All SEO optimizations reverted', 'info');
+        
+      } catch (error) {
+        console.error('SEO Optimizer: Failed to revert optimizations', error);
+      }
+    },
+    
+    // Store optimization in session storage
+    storeOptimization(instruction) {
+      const optimizations = JSON.parse(sessionStorage.getItem(`seo_optimizations_${siteId}`) || '[]');
+      optimizations.push({
+        ...instruction,
+        appliedAt: new Date().toISOString()
+      });
+      sessionStorage.setItem(`seo_optimizations_${siteId}`, JSON.stringify(optimizations));
+    },
+    
+    // Show optimization notification
+    showOptimizationNotification(message, type = 'success') {
+      // Remove existing notification
+      const existing = document.getElementById('seo-optimization-notification');
+      if (existing) existing.remove();
+      
+      const notification = document.createElement('div');
+      notification.id = 'seo-optimization-notification';
+      notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: ${type === 'success' ? '#4CAF50' : type === 'error' ? '#f44336' : '#2196F3'};
+        color: white;
+        padding: 12px 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        z-index: 10000;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 14px;
+        max-width: 300px;
+        animation: slideIn 0.3s ease-out;
+      `;
+      
+      notification.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span>${type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️'}</span>
+          <span>${message}</span>
+        </div>
+      `;
+      
+      // Add animation styles
+      if (!document.getElementById('seo-notification-styles')) {
+        const styles = document.createElement('style');
+        styles.id = 'seo-notification-styles';
+        styles.textContent = `
+          @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+          }
+        `;
+        document.head.appendChild(styles);
+      }
+      
+      document.body.appendChild(notification);
+      
+      // Auto-remove after 3 seconds
+      setTimeout(() => {
+        if (notification.parentNode) {
+          notification.style.animation = 'slideIn 0.3s ease-out reverse';
+          setTimeout(() => notification.remove(), 300);
+        }
+      }, 3000);
+    },
+    
+    // Create SEO control panel
+    createControlPanel() {
+      // Remove existing panel
+      const existing = document.getElementById('seo-control-panel');
+      if (existing) existing.remove();
+      
+      const panel = document.createElement('div');
+      panel.id = 'seo-control-panel';
+      panel.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: white;
+        border: 2px solid #2196F3;
+        border-radius: 12px;
+        padding: 15px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+        z-index: 10000;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 13px;
+        min-width: 200px;
+        max-width: 300px;
+      `;
+      
+      panel.innerHTML = `
+        <div style="margin-bottom: 10px; font-weight: bold; color: #2196F3;">
+          🔍 SEO Optimizer
+        </div>
+        <button id="seo-get-suggestions" style="
+          width: 100%;
+          padding: 8px 12px;
+          background: #4CAF50;
+          color: white;
+          border: none;
+          border-radius: 6px;
+          cursor: pointer;
+          margin-bottom: 8px;
+          font-size: 12px;
+        ">Get SEO Suggestions</button>
+        <button id="seo-revert-changes" style="
+          width: 100%;
+          padding: 8px 12px;
+          background: #ff9800;
+          color: white;
+          border: none;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 12px;
+        ">Revert Changes</button>
+        <div id="seo-suggestions-container" style="margin-top: 10px; max-height: 300px; overflow-y: auto;"></div>
+      `;
+      
+      document.body.appendChild(panel);
+      
+      // Add event listeners
+      document.getElementById('seo-get-suggestions').addEventListener('click', this.getSeoSuggestions.bind(this));
+      document.getElementById('seo-revert-changes').addEventListener('click', this.revertOptimizations.bind(this));
+    },
+    
+    // Get SEO suggestions from server
+    async getSeoSuggestions() {
+      const button = document.getElementById('seo-get-suggestions');
+      const container = document.getElementById('seo-suggestions-container');
+      
+      button.textContent = 'Analyzing...';
+      button.disabled = true;
+      
+      try {
+        const response = await fetch(`https://seo-script-hqz1.onrender.com/api/sites/${siteId}/analyze`, {
+          method: 'POST'
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+          this.displaySuggestions(data);
+        } else {
+          this.showOptimizationNotification('Failed to get SEO suggestions', 'error');
+        }
+        
+      } catch (error) {
+        console.error('Failed to get SEO suggestions:', error);
+        this.showOptimizationNotification('Network error getting suggestions', 'error');
+      } finally {
+        button.textContent = 'Get SEO Suggestions';
+        button.disabled = false;
+      }
+    },
+    
+    // Display suggestions in control panel
+    displaySuggestions(analysisData) {
+      const container = document.getElementById('seo-suggestions-container');
+      const { seoScore, criticalIssues, suggestions } = analysisData;
+      
+      container.innerHTML = `
+        <div style="margin-bottom: 10px; padding: 8px; background: #f5f5f5; border-radius: 6px;">
+          <strong>SEO Score: ${seoScore}/100</strong>
+          ${criticalIssues.length ? `<br><span style="color: #f44336;">Critical Issues: ${criticalIssues.length}</span>` : ''}
+        </div>
+      `;
+      
+      suggestions.forEach((suggestion, index) => {
+        const suggestionDiv = document.createElement('div');
+        suggestionDiv.style.cssText = `
+          margin-bottom: 8px;
+          padding: 8px;
+          border: 1px solid #ddd;
+          border-radius: 6px;
+          background: #fafafa;
+        `;
+        
+        const priorityColor = {
+          critical: '#f44336',
+          high: '#ff9800', 
+          medium: '#2196F3',
+          low: '#4CAF50'
+        }[suggestion.priority] || '#666';
+        
+        suggestionDiv.innerHTML = `
+          <div style="font-weight: bold; color: ${priorityColor}; margin-bottom: 4px;">
+            ${suggestion.priority.toUpperCase()}: ${suggestion.type.replace('_', ' ').toUpperCase()}
+          </div>
+          <div style="font-size: 11px; margin-bottom: 6px;">${suggestion.issue}</div>
+          <div style="font-size: 11px; margin-bottom: 6px; color: #666;">${suggestion.suggestion}</div>
+          <button onclick="seoOptimizer.applyOptimization(${JSON.stringify(suggestion).replace(/"/g, '&quot;')})" style="
+            padding: 4px 8px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 10px;
+          ">Apply Fix</button>
+        `;
+        
+        container.appendChild(suggestionDiv);
+      });
+    }
+  };
+  
+  // Make seoOptimizer globally accessible
+  window.seoOptimizer = seoOptimizer;
+  
+  // Create control panel when page loads
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      setTimeout(() => seoOptimizer.createControlPanel(), 1000);
+    });
+  } else {
+    setTimeout(() => seoOptimizer.createControlPanel(), 1000);
   }
 
 })();
