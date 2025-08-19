@@ -1390,16 +1390,18 @@
     }
   }
   
-  // Initialize without creating control panel (now handled by frontend)
+  // Create control panel when page loads
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
       setTimeout(() => {
         restorePersistedH1();
+        seoOptimizer.createControlPanel();
       }, 500);
     });
   } else {
     setTimeout(() => {
       restorePersistedH1();
+      seoOptimizer.createControlPanel();
     }, 500);
   }
 
