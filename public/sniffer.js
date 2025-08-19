@@ -378,7 +378,9 @@
       anchors: [],
       metaDescription: '',
       metaTags: [],
-      images: []
+      images: [],
+      paragraphs: [],
+      divs: []
     };
 
     // Extract headings (h1-h6)
@@ -428,6 +430,39 @@
         src: img.src,
         alt: img.getAttribute('alt') || ''
       });
+    });
+
+    // Extract paragraphs
+    const paragraphs = document.querySelectorAll('p');
+    paragraphs.forEach(p => {
+      const text = p.textContent.trim();
+      if (text) {
+        data.paragraphs.push({
+          text: text,
+          length: text.length
+        });
+      }
+    });
+
+    // Extract divs with text content
+    const divs = document.querySelectorAll('div');
+    divs.forEach(div => {
+      const text = div.textContent.trim();
+      // Only include divs with direct text content (not just nested elements)
+      const directText = Array.from(div.childNodes)
+        .filter(node => node.nodeType === 3) // Text nodes only
+        .map(node => node.textContent.trim())
+        .join(' ')
+        .trim();
+      
+      if (directText && directText.length > 10) { // Only meaningful text content
+        data.divs.push({
+          text: directText,
+          length: directText.length,
+          className: div.className || '',
+          id: div.id || ''
+        });
+      }
     });
 
     return data;
