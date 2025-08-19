@@ -5,9 +5,10 @@ import {
   registerSite, 
   collectSeoData, 
   getSitePages, 
-  getSeoSuggestions, 
-  crawlSitePages,
-  prepareDomOptimization,
+  analyzeSeoData,
+  autoInjectScript,
+  applySuggestion,
+  crawlProject,
   customH1Optimization
 } from '../Controllers/seoController.js';
 
@@ -41,10 +42,9 @@ router.post('/api/sites/:siteId/auto-inject', autoInjectScript);
 router.post('/api/sites/:siteId/apply-suggestion', applySuggestion);
 
 // Crawl all HTML files in project and extract SEO data
-router.post('/api/sites/:siteId/crawl', crawlSitePages);
+router.post('/api/sites/:siteId/crawl', crawlProject);
 
-// Prepare DOM optimization
-router.post('/api/sites/:siteId/prepare-optimization', prepareDomOptimization);
+// Prepare DOM optimization endpoint removed - function not exported
 
 // Custom H1 optimization with Gemini
 router.post('/api/sites/:siteId/custom-h1', customH1Optimization);
