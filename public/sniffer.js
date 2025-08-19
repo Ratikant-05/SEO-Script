@@ -393,12 +393,45 @@
       });
     });
 
-    // Extract anchors
-    const anchors = document.querySelectorAll('a[href]');
+    // Extract anchors with comprehensive details
+    const anchors = document.querySelectorAll('a');
     anchors.forEach(anchor => {
+      const href = anchor.getAttribute('href');
+      const text = anchor.textContent.trim();
+      const title = anchor.getAttribute('title') || '';
+      const target = anchor.getAttribute('target') || '';
+      const rel = anchor.getAttribute('rel') || '';
+      const className = anchor.className || '';
+      const id = anchor.id || '';
+      
+      // Determine link type
+      let linkType = 'internal';
+      if (href) {
+        if (href.startsWith('http') && !href.includes(window.location.hostname)) {
+          linkType = 'external';
+        } else if (href.startsWith('mailto:')) {
+          linkType = 'email';
+        } else if (href.startsWith('tel:')) {
+          linkType = 'phone';
+        } else if (href.startsWith('#')) {
+          linkType = 'anchor';
+        }
+      } else {
+        linkType = 'no-href';
+      }
+      
       data.anchors.push({
-        href: anchor.href,
-        text: anchor.textContent.trim()
+        href: href || '',
+        text: text,
+        title: title,
+        target: target,
+        rel: rel,
+        className: className,
+        id: id,
+        linkType: linkType,
+        hasText: text.length > 0,
+        isEmpty: text.length === 0,
+        wordCount: text.split(/\s+/).filter(word => word.length > 0).length
       });
     });
 
@@ -424,13 +457,64 @@
       }
     });
 
-    // Extract images
-    const images = document.querySelectorAll('img[src]');
+    // Extract images (including lazy loaded and background images)
+    const images = document.querySelectorAll('img');
     images.forEach(img => {
-      data.images.push({
-        src: img.src,
-        alt: img.getAttribute('alt') || ''
-      });
+      let src = img.src || img.getAttribute('src') || img.getAttribute('data-src') || img.getAttribute('data-lazy-src');
+      
+      // Handle relative URLs
+      if (src && !src.startsWith('http') && !src.startsWith('data:')) {
+        try {
+          src = new URL(src, window.location.href).href;
+        } catch (e) {
+          // Keep original if URL parsing fails
+        }
+      }
+      
+      if (src) {
+        data.images.push({
+          src: src,
+          alt: img.getAttribute('alt') || '',
+          title: img.getAttribute('title') || '',
+          width: img.naturalWidth || img.width || 0,
+          height: img.naturalHeight || img.height || 0,
+          className: img.className || '',
+          id: img.id || '',
+          loading: img.getAttribute('loading') || '',
+          srcset: img.getAttribute('srcset') || ''
+        });
+      }
+    });
+    
+    // Also extract background images from CSS
+    const elementsWithBgImages = document.querySelectorAll('*');
+    elementsWithBgImages.forEach(el => {
+      const style = window.getComputedStyle(el);
+      const bgImage = style.backgroundImage;
+      if (bgImage && bgImage !== 'none' && bgImage.includes('url(')) {
+        const urlMatch = bgImage.match(/url\(['"]?(.*?)['"]?\)/);
+        if (urlMatch && urlMatch[1]) {
+          let src = urlMatch[1];
+          if (!src.startsWith('http') && !src.startsWith('data:')) {
+            try {
+              src = new URL(src, window.location.href).href;
+            } catch (e) {
+              // Keep original if URL parsing fails
+            }
+          }
+          data.images.push({
+            src: src,
+            alt: el.getAttribute('alt') || '',
+            title: el.getAttribute('title') || '',
+            width: 0,
+            height: 0,
+            className: el.className || '',
+            id: el.id || '',
+            loading: 'background-image',
+            srcset: ''
+          });
+        }
+      }
     });
 
     // Extract paragraphs
@@ -445,24 +529,54 @@
       }
     });
 
-    // Extract divs with text content
+    // Extract divs with text content (improved extraction)
     const divs = document.querySelectorAll('div');
     divs.forEach(div => {
-      const text = div.textContent.trim();
-      // Only include divs with direct text content (not just nested elements)
+      const fullText = div.textContent.trim();
+      
+      // Get direct text content (immediate child text nodes)
       const directText = Array.from(div.childNodes)
         .filter(node => node.nodeType === 3) // Text nodes only
         .map(node => node.textContent.trim())
         .join(' ')
         .trim();
       
-      if (directText && directText.length > 10) { // Only meaningful text content
-        data.divs.push({
-          text: directText,
-          length: directText.length,
-          className: div.className || '',
-          id: div.id || ''
-        });
+      // Get text from immediate child elements (not deeply nested)
+      const immediateChildText = Array.from(div.children)
+        .filter(child => child.children.length === 0) // Only leaf elements
+        .map(child => child.textContent.trim())
+        .filter(text => text.length > 0)
+        .join(' ')
+        .trim();
+      
+      // Combine direct text and immediate child text
+      const combinedText = [directText, immediateChildText]
+        .filter(text => text.length > 0)
+        .join(' ')
+        .trim();
+      
+      // Use the most appropriate text content
+      let textToUse = combinedText || fullText;
+      
+      // Only include divs with meaningful content
+      if (textToUse && textToUse.length > 5) {
+        // Avoid duplicates by checking if this text is already captured in a parent
+        const isRedundant = data.divs.some(existingDiv => 
+          existingDiv.text.includes(textToUse) || textToUse.includes(existingDiv.text)
+        );
+        
+        if (!isRedundant) {
+          data.divs.push({
+            text: textToUse,
+            length: textToUse.length,
+            className: div.className || '',
+            id: div.id || '',
+            hasDirectText: directText.length > 0,
+            hasChildText: immediateChildText.length > 0,
+            childCount: div.children.length,
+            isVisible: div.offsetParent !== null
+          });
+        }
       }
     });
 
@@ -1181,6 +1295,59 @@
   
   // Make seoOptimizer globally accessible
   window.seoOptimizer = seoOptimizer;
+  
+  // Global function to fetch all anchor tags
+  window.getAllAnchorTags = function() {
+    const anchors = document.querySelectorAll('a');
+    const anchorData = [];
+    
+    anchors.forEach((anchor, index) => {
+      const href = anchor.getAttribute('href');
+      const text = anchor.textContent.trim();
+      const title = anchor.getAttribute('title') || '';
+      const target = anchor.getAttribute('target') || '';
+      const rel = anchor.getAttribute('rel') || '';
+      const className = anchor.className || '';
+      const id = anchor.id || '';
+      
+      // Determine link type
+      let linkType = 'internal';
+      if (href) {
+        if (href.startsWith('http') && !href.includes(window.location.hostname)) {
+          linkType = 'external';
+        } else if (href.startsWith('mailto:')) {
+          linkType = 'email';
+        } else if (href.startsWith('tel:')) {
+          linkType = 'phone';
+        } else if (href.startsWith('#')) {
+          linkType = 'anchor';
+        }
+      } else {
+        linkType = 'no-href';
+      }
+      
+      anchorData.push({
+        index: index + 1,
+        element: anchor,
+        href: href || '',
+        text: text,
+        title: title,
+        target: target,
+        rel: rel,
+        className: className,
+        id: id,
+        linkType: linkType,
+        hasText: text.length > 0,
+        isEmpty: text.length === 0,
+        wordCount: text.split(/\s+/).filter(word => word.length > 0).length,
+        isVisible: anchor.offsetParent !== null,
+        boundingRect: anchor.getBoundingClientRect()
+      });
+    });
+    
+    console.log(`Found ${anchorData.length} anchor tags:`, anchorData);
+    return anchorData;
+  };
   
   // Restore persisted H1 changes on page load
   function restorePersistedH1() {
