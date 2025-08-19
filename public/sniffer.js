@@ -872,7 +872,6 @@
         console.error('SEO Optimizer: Failed to revert optimizations', error);
       }
     },
-{{ ... }}
     
     // Store optimization in session storage
     storeOptimization(instruction) {
