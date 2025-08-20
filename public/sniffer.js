@@ -328,7 +328,9 @@
 
   // React/SPA detection and handling
   let isReactApp = false;
+  let isSPA = false;
   let lastUrl = window.location.href;
+  let lastHash = window.location.hash;
   
   // Detect if this is a React app
   function detectReactApp() {
@@ -341,6 +343,22 @@
     const hasReactFiber = !!document.querySelector('[data-reactroot], [data-react-checksum]');
     
     return hasReact || hasReactRoot || hasReactDevTools || hasReactFiber;
+  }
+  
+  // Detect if this is a Single Page Application (including hash routing)
+  function detectSPA() {
+    // Check for common SPA indicators
+    const hasHashRouting = window.location.hash.length > 1;
+    const hasHistoryAPI = !!(window.history && window.history.pushState);
+    const hasAngular = !!(window.angular || window.ng);
+    const hasVue = !!(window.Vue);
+    const hasEmber = !!(window.Ember);
+    const hasBackbone = !!(window.Backbone);
+    
+    // Check for common SPA routing libraries
+    const hasRouter = !!(window.Router || window.VueRouter || window.ReactRouter);
+    
+    return hasHashRouting || isReactApp || hasAngular || hasVue || hasEmber || hasBackbone || hasRouter;
   }
   
   // Wait for React libraries to load before detecting
@@ -365,10 +383,53 @@
   
   // Initial detection
   isReactApp = detectReactApp();
+  isSPA = detectSPA();
+  
+  console.log('SEO Sniffer: App type detection:', { isReactApp, isSPA });
   
   // If not detected initially, wait for React to load
   if (!isReactApp) {
     waitForReactDetection();
+  }
+  
+  // Setup hash change listener for SPAs with hash routing
+  function setupHashChangeListener() {
+    window.addEventListener('hashchange', function() {
+      const currentHash = window.location.hash;
+      const currentUrl = window.location.href;
+      
+      if (currentHash !== lastHash || currentUrl !== lastUrl) {
+        console.log('SEO Sniffer: Hash change detected:', { 
+          from: lastHash, 
+          to: currentHash,
+          fullUrl: currentUrl 
+        });
+        
+        lastHash = currentHash;
+        lastUrl = currentUrl;
+        
+        // Wait for content to update after hash change
+        setTimeout(() => {
+          console.log('SEO Sniffer: Extracting data after hash change...');
+          const seoData = extractSeoData();
+          sendData(seoData);
+        }, 1500); // Increased delay for hash routing content updates
+      }
+    });
+    
+    console.log('SEO Sniffer: Hash change listener setup complete');
+  }
+  
+  // Setup immediate hash capture for initial load
+  function captureInitialHashState() {
+    if (window.location.hash) {
+      console.log('SEO Sniffer: Initial hash detected:', window.location.hash);
+      // Ensure we capture the initial hash state
+      setTimeout(() => {
+        const seoData = extractSeoData();
+        sendData(seoData);
+      }, 2000); // Extra delay for hash-routed content to load
+    }
   }
 
   // Extract SEO data from the page
@@ -585,16 +646,23 @@
 
   // Send data to server
   function sendData(data) {
-    // Check if data was already sent for this page
-    if (wasDataSent()) {
+    // For SPAs with hash routing, include hash in the URL check
+    const currentUrl = window.location.href;
+    const urlKey = isSPA ? currentUrl : currentUrl.split('#')[0]; // For SPAs, use full URL including hash
+    
+    // Check if data was already sent for this specific URL (including hash for SPAs)
+    if (wasDataSent(urlKey)) {
+      console.log('SEO Sniffer: Data already sent for URL:', urlKey);
       return;
     }
 
     const payload = {
       siteId: siteId,
-      url: window.location.href,
+      url: currentUrl, // Always send full URL including hash
       data: data,
-      filePath: window.seoSnifferFilePath // Include detected file path
+      filePath: window.seoSnifferFilePath, // Include detected file path
+      isSPA: isSPA,
+      hasHash: !!window.location.hash
     };
 
     // Determine API endpoint based on environment
@@ -614,7 +682,8 @@
       },
       body: JSON.stringify(payload)
     }).then(() => {
-      markDataSent();
+      markDataSent(urlKey);
+      console.log('SEO Sniffer: Data sent successfully for URL:', urlKey);
     }).catch(error => {
       console.warn('SEO Sniffer: Failed to send data', error);
     });
@@ -622,9 +691,18 @@
 
   // Wait for DOM to be ready - React-compatible version
   function init() {
+    // Setup hash change listener for all SPAs
+    if (isSPA) {
+      setupHashChangeListener();
+      captureInitialHashState();
+    }
+    
     if (isReactApp) {
       // For React apps, wait longer and use multiple strategies
       initReactApp();
+    } else if (isSPA) {
+      // For other SPAs (Angular, Vue, etc.)
+      initSPA();
     } else {
       // Standard initialization for regular websites
       if (document.readyState === 'loading') {
@@ -640,6 +718,56 @@
           sendData(seoData);
         }, 100);
       }
+    }
+  }
+  
+  // SPA-specific initialization (non-React)
+  function initSPA() {
+    console.log('SEO Sniffer: SPA detected, using enhanced initialization');
+    
+    function waitForSPAContent() {
+      let attempts = 0;
+      const maxAttempts = 50; // 5 seconds max for SPAs
+      
+      function checkContent() {
+        attempts++;
+        
+        const hasHeadings = document.querySelectorAll('h1, h2, h3, h4, h5, h6').length > 0;
+        const hasLinks = document.querySelectorAll('a[href]').length > 0;
+        const hasImages = document.querySelectorAll('img[src]').length > 0;
+        const hasContent = document.body.textContent.trim().length > 100;
+        
+        const hasSignificantContent = hasHeadings || hasLinks || hasImages || hasContent;
+        
+        console.log(`SEO Sniffer: SPA attempt ${attempts} - Content check:`, {
+          hasHeadings,
+          hasLinks,
+          hasImages,
+          hasContent,
+          hasSignificantContent
+        });
+        
+        if (hasSignificantContent || attempts >= maxAttempts) {
+          console.log('SEO Sniffer: SPA content detected, extracting data...');
+          setTimeout(() => {
+            const seoData = extractSeoData();
+            console.log('SEO Sniffer: SPA extracted data:', seoData);
+            sendData(seoData);
+          }, 500);
+        } else {
+          setTimeout(checkContent, 100);
+        }
+      }
+      
+      checkContent();
+    }
+    
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(waitForSPAContent, 300);
+      });
+    } else {
+      setTimeout(waitForSPAContent, 300);
     }
   }
 
@@ -833,14 +961,29 @@
   let dataSent = false;
   
   // Mark that data has been sent to avoid duplicates
-  function markDataSent() {
+  function markDataSent(urlKey) {
     dataSent = true;
-    sessionStorage.setItem(`seo-sniffer-sent-${siteId}`, window.location.href);
+    const key = urlKey || window.location.href;
+    sessionStorage.setItem(`seo-sniffer-sent-${siteId}`, key);
+    
+    // For SPAs, also store in a separate hash-aware storage
+    if (isSPA && window.location.hash) {
+      const hashKey = `seo-sniffer-hash-sent-${siteId}-${btoa(key)}`;
+      sessionStorage.setItem(hashKey, 'true');
+    }
   }
   
   // Check if data was already sent for this page in this session
-  function wasDataSent() {
-    return sessionStorage.getItem(`seo-sniffer-sent-${siteId}`) === window.location.href;
+  function wasDataSent(urlKey) {
+    const key = urlKey || window.location.href;
+    
+    // For SPAs with hash routing, check hash-specific storage
+    if (isSPA && window.location.hash) {
+      const hashKey = `seo-sniffer-hash-sent-${siteId}-${btoa(key)}`;
+      return sessionStorage.getItem(hashKey) === 'true';
+    }
+    
+    return sessionStorage.getItem(`seo-sniffer-sent-${siteId}`) === key;
   }
 
   // DOM-based SEO optimization functions
