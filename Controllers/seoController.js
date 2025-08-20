@@ -810,6 +810,7 @@ export const scrapeUrl = async (req, res) => {
 
     // Scrape the URL
     const scrapedData = await scrapeUrlData(url);
+    console.log(scrapedData)
 
     res.json({
       message: 'URL scraped successfully',
