@@ -3,14 +3,16 @@ import SeoSnapshot from '../Models/SeoSnapshot.js';
 import path from 'path';
 import crypto from 'crypto';
 import fs from 'fs/promises';
+import axios from 'axios';
 import { JSDOM } from 'jsdom';
 
-// Server-side SEO data extraction function
+// Server-side SEO data extraction function using JSDOM
 function extractSeoDataFromHtml(htmlContent, filePath, baseUrl = '') {
   const dom = new JSDOM(htmlContent);
   const document = dom.window.document;
   
   const data = {
+    title: '',
     headings: [],
     anchors: [],
     metaDescription: '',
@@ -19,6 +21,9 @@ function extractSeoDataFromHtml(htmlContent, filePath, baseUrl = '') {
     paragraphs: [],
     divs: []
   };
+
+  // Extract title
+  data.title = document.title || '';
 
   // Extract headings (h1-h6)
   const headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6');
@@ -33,7 +38,7 @@ function extractSeoDataFromHtml(htmlContent, filePath, baseUrl = '') {
   const anchors = document.querySelectorAll('a[href]');
   anchors.forEach(anchor => {
     data.anchors.push({
-      href: anchor.href,
+      href: anchor.getAttribute('href') || '',
       text: anchor.textContent.trim()
     });
   });
@@ -60,13 +65,16 @@ function extractSeoDataFromHtml(htmlContent, filePath, baseUrl = '') {
     }
   });
 
-  // Extract images
-  const images = document.querySelectorAll('img[src]');
+  // Extract images with src and alt
+  const images = document.querySelectorAll('img');
   images.forEach(img => {
-    data.images.push({
-      src: img.src,
-      alt: img.getAttribute('alt') || ''
-    });
+    const src = img.getAttribute('src') || img.getAttribute('data-src') || '';
+    if (src) {
+      data.images.push({
+        src: src,
+        alt: img.getAttribute('alt') || ''
+      });
+    }
   });
 
   // Extract paragraphs
@@ -81,28 +89,53 @@ function extractSeoDataFromHtml(htmlContent, filePath, baseUrl = '') {
     }
   });
 
-  // Extract divs with text content
+  // Extract divs with text content (including spans)
   const divs = document.querySelectorAll('div');
   divs.forEach(div => {
-    const text = div.textContent.trim();
-    // Only include divs with direct text content (not just nested elements)
-    const directText = Array.from(div.childNodes)
-      .filter(node => node.nodeType === 3) // Text nodes only
-      .map(node => node.textContent.trim())
-      .join(' ')
-      .trim();
+    const fullText = div.textContent.trim();
     
-    if (directText && directText.length > 10) { // Only meaningful text content
-      data.divs.push({
-        text: directText,
-        length: directText.length,
-        className: div.className || '',
-        id: div.id || ''
-      });
+    // Get text from spans within this div
+    const spans = div.querySelectorAll('span');
+    const spanText = Array.from(spans).map(span => span.textContent.trim()).join(' ').trim();
+    
+    if (fullText && fullText.length > 5) {
+      // Avoid duplicates by checking if this text is already captured
+      const isRedundant = data.divs.some(existingDiv => 
+        existingDiv.text.includes(fullText) || fullText.includes(existingDiv.text)
+      );
+      
+      if (!isRedundant) {
+        const spanCount = spans.length;
+        data.divs.push({
+          text: fullText,
+          length: fullText.length,
+          className: div.className || '',
+          id: div.id || '',
+          hasSpans: spanCount > 0,
+          spanCount: spanCount,
+          spanText: spanText
+        });
+      }
     }
   });
 
   return data;
+}
+
+// Scrape external URL using Axios and Cheerio
+async function scrapeUrlData(url) {
+  try {
+    const response = await axios.get(url, {
+      timeout: 10000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      }
+    });
+    
+    return extractSeoDataFromHtml(response.data, null, url);
+  } catch (error) {
+    throw new Error(`Failed to scrape URL: ${error.message}`);
+  }
 }
 
 // Collect SEO data from client
@@ -756,5 +789,40 @@ Make the H1 compelling, SEO-friendly, and exactly what the user requested.`;
   } catch (error) {
     console.error('Error optimizing H1:', error);
     res.status(500).json({ error: 'Failed to optimize H1' });
+  }
+};
+
+// Scrape external URL endpoint
+export const scrapeUrl = async (req, res) => {
+  try {
+    const { url } = req.body;
+
+    if (!url) {
+      return res.status(400).json({ error: 'URL is required' });
+    }
+
+    // Validate URL format
+    try {
+      new URL(url);
+    } catch (error) {
+      return res.status(400).json({ error: 'Invalid URL format' });
+    }
+
+    // Scrape the URL
+    const scrapedData = await scrapeUrlData(url);
+
+    res.json({
+      message: 'URL scraped successfully',
+      url: url,
+      data: scrapedData,
+      scrapedAt: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Error scraping URL:', error);
+    res.status(500).json({ 
+      error: 'Failed to scrape URL',
+      details: error.message 
+    });
   }
 };

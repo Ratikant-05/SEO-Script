@@ -590,7 +590,7 @@
       }
     });
 
-    // Extract divs with text content (improved extraction)
+    // Extract divs with text content (improved extraction including spans)
     const divs = document.querySelectorAll('div');
     divs.forEach(div => {
       const fullText = div.textContent.trim();
@@ -602,22 +602,22 @@
         .join(' ')
         .trim();
       
-      // Get text from immediate child elements (not deeply nested)
+      // Get text from immediate child elements (including spans and other inline elements)
       const immediateChildText = Array.from(div.children)
-        .filter(child => child.children.length === 0) // Only leaf elements
         .map(child => child.textContent.trim())
         .filter(text => text.length > 0)
         .join(' ')
         .trim();
       
-      // Combine direct text and immediate child text
-      const combinedText = [directText, immediateChildText]
+      // Get text specifically from span elements within this div (all levels)
+      const spanText = Array.from(div.querySelectorAll('span'))
+        .map(span => span.textContent.trim())
         .filter(text => text.length > 0)
         .join(' ')
         .trim();
       
-      // Use the most appropriate text content
-      let textToUse = combinedText || fullText;
+      // Combine all text sources, prioritizing the most comprehensive
+      let textToUse = fullText; // Use full text to include all nested content
       
       // Only include divs with meaningful content
       if (textToUse && textToUse.length > 5) {
@@ -627,6 +627,7 @@
         );
         
         if (!isRedundant) {
+          const spanCount = div.querySelectorAll('span').length;
           data.divs.push({
             text: textToUse,
             length: textToUse.length,
@@ -634,6 +635,9 @@
             id: div.id || '',
             hasDirectText: directText.length > 0,
             hasChildText: immediateChildText.length > 0,
+            hasSpans: spanCount > 0,
+            spanCount: spanCount,
+            spanText: spanText,
             childCount: div.children.length,
             isVisible: div.offsetParent !== null
           });

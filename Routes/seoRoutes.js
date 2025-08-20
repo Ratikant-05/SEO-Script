@@ -9,7 +9,8 @@ import {
   autoInjectScript,
   applySuggestion,
   crawlProject,
-  customH1Optimization
+  customH1Optimization,
+  scrapeUrl
 } from '../Controllers/seoController.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -48,5 +49,8 @@ router.post('/api/sites/:siteId/crawl', crawlProject);
 
 // Custom H1 optimization with Gemini
 router.post('/api/sites/:siteId/custom-h1', customH1Optimization);
+
+// Scrape external URL
+router.post('/api/scrape', scrapeUrl);
 
 export default router;
