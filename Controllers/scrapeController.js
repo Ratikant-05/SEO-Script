@@ -1,10 +1,10 @@
 import ScrapedData from "../Models/ScrapedData.js";
 import CrawlSession from "../Models/CrawlSession.js";
 import puppeteer from "puppeteer";
-import axios from "axios";
 import {crawlPage} from '../utils/crawlPage.js';
 import { getOptimizedTextContentFromAI } from "../utils/aiOptimiser.js";
 
+// crawling website
 export const crawlSite = async (req, res) => {
   const {
     startUrl,
@@ -12,11 +12,28 @@ export const crawlSite = async (req, res) => {
     siteId = "default-site",
     userId = "default-user",
   } = req.body;
-  if (!startUrl) return res.status(400).json({ error: "startUrl is required" });
+  
+  if (!startUrl) {
+    return res.status(400).json({ error: "startUrl is required" });
+  }
+
+  if (typeof crawlPage !== 'function') {
+    console.error('❌ crawlPage function is not defined or not a function');
+    return res.status(500).json({ error: "crawlPage function not available" });
+  }
 
   let browser;
+  let session; // Declare session here to be accessible in finally block for update
   try {
-    browser = await puppeteer.launch({ headless: true });
+    console.log('🚀 Starting crawl process...');
+    console.log('StartUrl:', startUrl);
+    console.log('MaxPages:', maxPages);
+    
+    // It's often safer to use a non-headless mode for debugging in development,
+    // but keep headless: true for production/deployment.
+    browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    console.log('✅ Browser launched successfully');
+    
     const baseUrl = new URL(startUrl).origin;
     const visited = new Set();
     const queue = [startUrl];
@@ -24,143 +41,311 @@ export const crawlSite = async (req, res) => {
     const scrapedPageIds = [];
     let pagesCrawled = 0;
 
-    // ✅ Create empty session first
-    const session = await CrawlSession.create({
+    // Create crawl session
+    console.log('📝 Creating crawl session...');
+    session = await CrawlSession.create({ // Assign to the 'session' variable declared outside try
       siteId,
       userId,
       startUrl,
       totalUrlsScraped: 0,
       visitedUrls: [],
+      status: 'in_progress'
     });
+    console.log('✅ Crawl session created:', session._id);
 
     while (queue.length > 0 && pagesCrawled < maxPages) {
       const currentUrl = queue.shift();
       const cleanUrlForCheck = currentUrl.split("#")[0];
-      if (visited.has(cleanUrlForCheck)) continue;
+      
+      if (visited.has(cleanUrlForCheck)) {
+        console.log('⏭️  Skipping already visited URL:', cleanUrlForCheck);
+        continue;
+      }
       visited.add(cleanUrlForCheck);
       pagesCrawled++;
 
-      try {
-        const { pageData, newLinks } = await crawlPage(
-          browser,
-          currentUrl,
-          visited
-        );
+      console.log(`\n🔍 Processing page ${pagesCrawled}/${maxPages}: ${currentUrl}`);
+      console.log('Queue remaining:', queue.length);
 
-        if (pageData && pageData.rawHTML) {
+      try {
+        console.log('📡 Calling crawlPage function...');
+        
+        const crawlResult = await crawlPage(browser, currentUrl);
+        
+        console.log('📋 CrawlPage result received:');
+        console.log('- Result exists:', crawlResult ? '✅ YES' : '❌ NO');
+        
+        if (!crawlResult || !crawlResult.pageData) { // Added check for pageData presence
+          console.log('❌ crawlPage returned null or no pageData, skipping this URL.');
+          await CrawlSession.findByIdAndUpdate(session._id, { 
+            $addToSet: { failedUrls: currentUrl } 
+          });
+          continue;
+        }
+
+        const { pageData, newLinks = new Set() } = crawlResult;
+        
+        if (!pageData || !pageData.url) {
+          console.log('❌ Invalid pageData received from crawlPage (missing url), skipping save...');
+          await CrawlSession.findByIdAndUpdate(session._id, { 
+            $addToSet: { failedUrls: currentUrl } 
+          });
+          continue;
+        }
+
+        console.log('📄 PageData analysis:');
+        console.log('- URL:', pageData.url);
+        console.log('- Has rawHTML:', pageData.rawHTML ? '✅ YES' : '❌ NO');
+        console.log('- Has fileId:', pageData.fileId ? '✅ YES' : '❌ NO');
+        
+        if (pageData.rawHTML) {
+          console.log('✅ PageData has rawHTML, proceeding with save...');
           let optimizedHtml = null;
 
-          // ✅ AI Optimization
+          // AI Optimization
           try {
-            console.log(`Optimizing HTML for: ${pageData.url}`);
-            optimizedHtml = await getOptimizedTextContentFromAI(
-              pageData.rawHTML
-            );
+            console.log(`🤖 Optimizing HTML for: ${pageData.url}`);
+            optimizedHtml = await getOptimizedTextContentFromAI(pageData.rawHTML);
+            console.log('✅ HTML optimization completed');
           } catch (optimizationError) {
             console.error(
-              `Could not optimize HTML for ${pageData.url}: ${optimizationError.message}`
+              `❌ Could not optimize HTML for ${pageData.url}: ${optimizationError.message}`
             );
+            // Fallback to rawHTML if optimization fails
+            optimizedHtml = pageData.rawHTML; 
           }
 
-          optimizedHtml = optimizedHtml || pageData.rawHTML;
+          const dataToSave = {
+            fileId: pageData.fileId,
+            fileName: pageData.fileName,
+            url: pageData.url,
+            
+            userId,
+            siteId,
+            crawlSessionId: session._id,
+            
+            headings: pageData.headings || [],
+            paragraphs: pageData.paragraphs || [],
+            links: pageData.links || [],
+            lists: pageData.lists || [],
+            tables: pageData.tables || [],
+            images: pageData.images || [],
+            divs: pageData.divs || [],
+            spans: pageData.spans || [],
+            forms: pageData.forms || [],
+            navigation: pageData.navigation || [],
+            footer: pageData.footer || [],
+            header: pageData.header || [],
+            main: pageData.main || [],
+            articles: pageData.articles || [],
+            sections: pageData.sections || [],
+            
+            textContent: [pageData.textContent],
+            rawHTML: pageData.rawHTML,
+            optimizedHtml,
+            
+            keywords: pageData.keywords || [],
+            author: pageData.author || null,
+            metaDescription: pageData.metaDescription || null,
+            theme: {
+              // Ensure timestamp is a Date object, even if it comes as a string or a partial object
+              extracted: pageData.theme?.extracted || false,
+              backgroundColor: pageData.theme?.backgroundColor || null,
+              textColor: pageData.theme?.textColor || null,
+              fontFamily: pageData.theme?.fontFamily || null,
+            },
+            
+            additionalUrls: (pageData.additionalUrls || []).map(urlObj => ({
+              url: urlObj.url,
+              source: urlObj.source || 'internal links',
+              timestamp: urlObj.timestamp ? new Date(urlObj.timestamp) : new Date() // FIX HERE
+            })),
+            scrapingMethod: "enhanced",
+            
+            filePath: pageData.filePath || null,
+            metadata: {
+              fileSize: pageData.metadata?.fileSize || pageData.rawHTML.length,
+              version: pageData.metadata?.version || "2.0.0",
+              note: pageData.metadata?.note || "",
+              error: pageData.metadata?.error || false
+            },
+            
+            savedAt: new Date(),
+            scrapedAt: new Date()
+          };
 
-          // ✅ Build scraped page doc
+          console.log('💽 Attempting to save to database...');
           try {
-            const dataToSave = {
-              siteId,
-              userId,
-              crawlSessionId: session._id,
-              fileId: pageData.fileName,
-              fileName: pageData.fileName,
-              url: pageData.url,
-              optimizedHtml,
-              rawHTML: pageData.rawHTML,
-              headings: pageData.headings || [],
-              paragraphs: pageData.paragraphs || [],
-              links: pageData.links || [],
-              lists: pageData.lists || [],
-              tables: pageData.tables || [],
-              images: pageData.images || [],
-              divs: pageData.divs || [],
-              spans: pageData.spans || [],
-              forms: pageData.forms || [],
-              navigation: pageData.navigation || [],
-              footer: pageData.footer || [],
-              header: pageData.header || [],
-              main: pageData.main || [],
-              articles: pageData.articles || [],
-              sections: pageData.sections || [],
-              textContent: pageData.textContent || [],
-              theme: pageData.theme || {},
-              keywords: pageData.keywords || [],
-              additionalUrls: pageData.additionalUrls || [],
-              scrapingMethod: "enhanced",
-              metadata: pageData.metadata || {},
-            };
-
             const scrapedPage = await ScrapedData.findOneAndUpdate(
-              { fileId: pageData.fileName },
+              { fileId: dataToSave.fileId, crawlSessionId: session._id },
               { $set: dataToSave },
               { upsert: true, new: true }
             );
-
+            
+            console.log("✅ Successfully saved ScrapedData with fileId:", dataToSave.fileId);
+            console.log("✅ ScrapedPage ID:", scrapedPage._id);
             scrapedPageIds.push(scrapedPage._id);
-            console.log(`Saved data for: ${pageData.url}`);
+            
+            crawledDataForResponse.push({ 
+              ...pageData, 
+              optimizedHtml,
+              scrapedPageId: scrapedPage._id
+            });
+
+            await CrawlSession.findByIdAndUpdate(session._id, {
+                $inc: { totalUrlsScraped: 1 },
+                $addToSet: { visitedUrls: pageData.url, scrapedPageIds: scrapedPage._id },
+            });
+            console.log(`✅ Crawl session updated for URL: ${pageData.url}`);
+
           } catch (dbError) {
             console.error(
-              `Failed to save data for ${pageData.url}: ${dbError.message}`
+              `❌ Failed to save data for ${pageData.url} (fileId: ${dataToSave.fileId}): ${dbError.message}`
             );
+            console.error('❌ Full database error:', dbError);
+            await CrawlSession.findByIdAndUpdate(session._id, { 
+              $addToSet: { failedUrls: pageData.url } 
+            });
           }
-
-          crawledDataForResponse.push({ ...pageData, optimizedHtml });
+        } else {
+          console.log('❌ No rawHTML found in pageData, skipping save...');
+          await CrawlSession.findByIdAndUpdate(session._id, { 
+            $addToSet: { failedUrls: currentUrl } 
+          });
         }
 
-        // ✅ Queue new links
+        console.log(`🔗 Processing ${newLinks.size} new links...`);
         newLinks.forEach((linkUrl) => {
           try {
             const absoluteUrl = new URL(linkUrl, baseUrl).href;
             const cleanLink = absoluteUrl.split("#")[0];
-            if (cleanLink.startsWith(baseUrl) && !visited.has(cleanLink)) {
-              if (
+
+            if (cleanLink.startsWith(baseUrl) && 
+                !visited.has(cleanLink) && 
                 ![...queue].some((qUrl) => qUrl.split("#")[0] === cleanLink)
-              ) {
-                queue.push(absoluteUrl);
-              }
+            ) {
+              queue.push(absoluteUrl);
+              console.log('➕ Added to queue:', cleanLink);
             }
-          } catch {
-            // ignore invalid URLs
+          } catch (linkError) {
+            console.log('❌ Invalid URL ignored:', linkUrl, linkError.message);
           }
         });
+        
       } catch (err) {
-        console.error(`Failed to crawl ${currentUrl}: ${err.message}`);
+        console.error(`❌ ERROR in main crawl loop for ${currentUrl}:`, err.message);
+        console.error('❌ Full error:', err);
+        console.error('❌ Stack trace:', err.stack);
+        await CrawlSession.findByIdAndUpdate(session._id, { 
+          $addToSet: { failedUrls: currentUrl } 
+        });
       }
+      
+      console.log(`--- Finished processing ${currentUrl} ---\n`);
     }
 
-    // ✅ Update crawl session with summary + scraped page references
+    const finalVisitedUrls = Array.from(visited);
+    const finalScrapedPageIds = Array.from(new Set(scrapedPageIds));
+
     const crawlResponse = {
       message: "Crawling finished.",
-      totalUrlsScraped: visited.size,
-      visitedUrls: Array.from(visited),
-      data: crawledDataForResponse,
+      totalUrlsAttempted: pagesCrawled,
+      totalUrlsScraped: finalScrapedPageIds.length,
+      visitedUrls: finalVisitedUrls.length,
+      crawledPages: crawledDataForResponse.length,
     };
 
-    await CrawlSession.findByIdAndUpdate(session._id, {
-      $set: {
-        totalUrlsScraped: visited.size,
-        visitedUrls: Array.from(visited),
-        scrapedPageIds, // renamed to match ScrapedData references
-      },
-    });
+    console.log('📊 Final results:');
+    console.log('- Total URLs attempted:', pagesCrawled);
+    console.log('- Total URLs scraped successfully:', finalScrapedPageIds.length);
+    console.log('- Visited URLs (including those that failed to save):', finalVisitedUrls.length);
 
-    console.log(`Crawl session saved with ID: ${session._id}`);
-    res.json({ ...crawlResponse, sessionId: session._id });
+    if (session && session._id) { // Ensure session exists before updating
+      await CrawlSession.findByIdAndUpdate(session._id, {
+        $set: {
+          totalUrlsScraped: finalScrapedPageIds.length,
+          visitedUrls: finalVisitedUrls,
+          scrapedPageIds: finalScrapedPageIds,
+          status: 'completed',
+          completedAt: new Date(),
+        },
+      });
+      console.log(`✅ Crawl session updated with ID: ${session._id}`);
+    }
+
+    res.json({ 
+      ...crawlResponse, 
+      sessionId: session?._id, // Use optional chaining
+      scrapedPageIds: finalScrapedPageIds.length
+    });
+    
   } catch (error) {
-    console.error("An error occurred during the crawl operation:", error);
-    res.status(500).json({ error: "Crawling failed." });
+    console.error("❌ CRITICAL ERROR during crawl operation:", error);
+    console.error("❌ Error details:", error.message);
+    console.error("❌ Stack trace:", error.stack);
+    
+    if (session && session._id) {
+      await CrawlSession.findByIdAndUpdate(session._id, {
+        $set: { status: 'failed', errorMessage: error.message, completedAt: new Date() }
+      });
+    }
+
+    res.status(500).json({ error: "Crawling failed.", details: error.message });
   } finally {
-    if (browser) await browser.close();
+    if (browser) {
+      await browser.close();
+      console.log('🔒 Browser closed');
+    }
   }
 };
+
+// displaying the data crawled in the UI
+export const fetchCrawledData = async (req, res) => {
+  const { crawlSessionId, userId } = req.body;
+
+  if (!crawlSessionId) {
+    return res.status(400).json({ error: "Invalid Crawl Session ID" });
+  }
+
+  try {
+    // Find all scraped data associated with the crawl session
+    const scrapedData = await ScrapedData.find({ 
+      crawlSessionId,
+      ...(userId && { userId }) // Only include userId in query if provided
+    }).select({
+      // Select specific fields to return
+      url: 1,
+      headings: 1,
+      paragraphs: 1,
+      links: 1,
+      images: 1,
+      keywords: 1,
+      theme: 1,
+      metadata: 1,
+      scrapedAt: 1,
+      additionalUrls: 1
+    }).sort({ scrapedAt: -1 }); // Sort by most recent first
+
+    if (!scrapedData || scrapedData.length === 0) {
+      return res.status(404).json({ 
+        error: "No scraped data found for this crawl session" 
+      });
+    }
+
+    // Return the scraped data
+    return res.status(200).json({
+      success: true,
+      count: scrapedData.length,
+      data: scrapedData
+    });
+
+  } catch (error) {
+    console.error("Error fetching scraped data:", error);
+    return res.status(500).json({ 
+      error: "Internal server error while fetching scraped data" 
+    });
+  }
+}
 
 export const applySEOChanges = async (req, res) => {
   const { url, changes } = req.body;
@@ -272,271 +457,93 @@ export const applySEOChanges = async (req, res) => {
   }
 };
 
+// for single seo change
 export const getSeoSuggestions = async (req, res) => {
   try {
-    const { url, sessionId, siteId, userId } = req.body;
+    const { crawlSessionId, userId } = req.body;
 
-    if (!url) {
-      return res.status(400).json({ error: "URL is required" });
+    if (!crawlSessionId) {
+      return res.status(400).json({ error: "Crawl Session ID is required" });
     }
 
-    // Here you would typically fetch the crawled data from your database
-    // For this example, we'll simulate fetching the data
-    const pageData = await fetchCrawledData(url, sessionId);
-
-    if (!pageData) {
-      return res
-        .status(404)
-        .json({ error: "No crawled data found for this URL" });
-    }
-
-    // Generate SEO suggestions using AI
-    const seoSuggestions = await generateSEOSuggestions(pageData);
-
-    // Return the suggestions
-    res.json(seoSuggestions);
-  } catch (error) {
-    console.error("Error generating SEO suggestions:", error);
-    res.status(500).json({ error: "Failed to generate SEO suggestions" });
-  }
-};
-
-async function fetchCrawledData(url, sessionId) {
-  try {
-    // In a real implementation, you would fetch this from your database
-    // For this example, we'll use puppeteer to fetch the current page data
-    const browser = await puppeteer.launch({ headless: "new" });
-    const page = await browser.newPage();
-
-    await page.goto(url, { waitUntil: "networkidle2" });
-
-    // Extract page data using Puppeteer
-    const pageData = await page.evaluate(() => {
-      // Helper function to get meta description
-      function getMetaDescription() {
-        const metaDesc = document.querySelector('meta[name="description"]');
-        return metaDesc ? metaDesc.getAttribute("content") : null;
-      }
-
-      // Helper function to extract headings
-      function extractHeadings() {
-        const headings = [];
-        const headingElements = document.querySelectorAll(
-          "h1, h2, h3, h4, h5, h6"
-        );
-
-        headingElements.forEach((el, index) => {
-          headings.push({
-            selector: getUniqueSelector(el),
-            level: el.tagName.toLowerCase(),
-            text: el.textContent.trim(),
-          });
-        });
-
-        return headings;
-      }
-
-      // Helper function to extract paragraphs
-      function extractParagraphs() {
-        const paragraphs = [];
-        const paraElements = document.querySelectorAll("p");
-
-        paraElements.forEach((el, index) => {
-          // Skip very short paragraphs or those likely to be UI elements
-          if (el.textContent.trim().length > 20) {
-            paragraphs.push({
-              selector: getUniqueSelector(el),
-              text: el.textContent.trim(),
-            });
-          }
-        });
-
-        return paragraphs;
-      }
-
-      // Helper function to extract images
-      function extractImages() {
-        const images = [];
-        const imgElements = document.querySelectorAll("img");
-
-        imgElements.forEach((el, index) => {
-          // Skip tiny images that are likely icons
-          if (el.width > 50 && el.height > 50) {
-            images.push({
-              selector: getUniqueSelector(el),
-              src: el.src,
-              alt: el.alt || "",
-            });
-          }
-        });
-
-        return images;
-      }
-
-      // Generate a unique CSS selector for an element
-      function getUniqueSelector(el) {
-        // Simple implementation - in a real app you'd want something more robust
-        if (el.id) {
-          return `#${el.id}`;
-        }
-
-        if (el.className) {
-          const classes = el.className
-            .split(" ")
-            .filter((c) => c.trim().length > 0)
-            .join(".");
-
-          if (classes) {
-            return `.${classes}`;
-          }
-        }
-
-        // Fallback to tag name and position
-        const siblings = Array.from(el.parentNode.children);
-        const index = siblings.indexOf(el) + 1;
-        return `${el.tagName.toLowerCase()}:nth-child(${index})`;
-      }
-
-      return {
-        title: document.title || "Sample Page Title",
-        metaDescription: getMetaDescription() || "",
-        headings: extractHeadings(),
-        paragraphs: extractParagraphs(),
-        images: extractImages(),
-        keywords: ["seo", "optimization", "website", "content"], // Default keywords
-      };
+    // Fetch the crawled data using our updated fetchCrawledData function
+    const crawledData = await ScrapedData.find({ 
+      crawlSessionId,
+      ...(userId && { userId })
+    }).select({
+      url: 1,
+      headings: 1,
+      paragraphs: 1,
+      links: 1,
+      images: 1,
+      keywords: 1,
+      theme: 1,
+      metadata: 1
     });
 
-    await browser.close();
+    if (!crawledData || crawledData.length === 0) {
+      return res.status(404).json({ 
+        error: "No crawled data found for this session" 
+      });
+    }
 
-    return {
-      url,
-      ...pageData,
-      sessionId,
-    };
-  } catch (error) {
-    console.error("Error fetching page data:", error);
-
-    // Return mock data if fetching fails
-    return {
-      url,
-      title: "Sample Page Title",
-      metaDescription: "",
-      headings: [],
-      paragraphs: [],
-      images: [],
-      keywords: ["seo", "optimization", "website", "content"],
-      sessionId,
-    };
-  }
-}
-
-async function generateSEOSuggestions(pageData) {
-  try {
-    // Prepare the prompt for the AI
-    const prompt = `
-      You are an SEO expert. Analyze this webpage and provide specific optimization suggestions.
-      
-      URL: ${pageData.url}
-      Title: ${pageData.title}
-      Meta Description: ${pageData.metaDescription || "None"}
-      
-      Headings:
-      ${JSON.stringify(pageData.headings, null, 2)}
-      
-      Paragraphs (sample):
-      ${JSON.stringify(pageData.paragraphs.slice(0, 3), null, 2)}
-      
-      Images:
-      ${JSON.stringify(pageData.images, null, 2)}
-      
-      Keywords: ${pageData.keywords.join(", ")}
-      
-      Please provide specific suggestions for:
-      1. Title tag optimization
-      2. Meta description optimization
-      3. Heading improvements
-      4. Paragraph content enhancements
-      5. Image alt text improvements
-      
-      Format your response as a JSON object with these keys:
-      - titleTagAnalysis: { current, suggestion }
-      - metaDescriptionAnalysis: { current, suggestion }
-      - headingsAnalysis: [{ selector, level, current, suggestion }]
-      - paragraphAnalysis: [{ selector, current, suggestion }]
-      - imageAnalysis: [{ selector, currentAlt, altSuggestion }]
-    `;
-
-    // Call the AI API (OpenRouter in this case)
-    const response = await axios.post(
-      "https://openrouter.ai/api/v1/chat/completions",
-      {
-        model: "openai/gpt-4-turbo",
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are an SEO expert assistant that provides specific, actionable suggestions for webpage optimization.",
+    // Process each page with AI optimization
+    const optimizationPromises = crawledData.map(async (pageData) => {
+      try {
+        const optimizedContent = await getOptimizedTextContentFromAI(pageData);
+        return {
+          url: pageData.url,
+          originalData: {
+            headings: pageData.headings,
+            keywords: pageData.keywords,
+            metadata: pageData.metadata
           },
-          { role: "user", content: prompt },
-        ],
-        response_format: { type: "json_object" },
-      },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-        },
+          optimization: optimizedContent
+        };
+      } catch (error) {
+        console.error(`Error optimizing ${pageData.url}:`, error);
+        return {
+          url: pageData.url,
+          error: "Failed to optimize this page",
+          originalData: pageData
+        };
       }
-    );
+    });
 
-    // Parse the AI response
-    const aiResponse = response.data.choices[0].message.content;
-    const suggestions = JSON.parse(aiResponse);
+    // Wait for all optimizations to complete
+    const results = await Promise.all(optimizationPromises);
 
-    return suggestions;
+    // Calculate overall statistics
+    const overallStats = results.reduce((stats, result) => {
+      if (result.optimization?.seoAnalysis?.score) {
+        stats.totalScore += result.optimization.seoAnalysis.score;
+        stats.analyzedPages++;
+      }
+      return stats;
+    }, { totalScore: 0, analyzedPages: 0 });
+
+    // Return the complete analysis
+    return res.status(200).json({
+      success: true,
+      summary: {
+        totalPages: results.length,
+        averageSeoScore: overallStats.analyzedPages > 0 
+          ? Math.round(overallStats.totalScore / overallStats.analyzedPages) 
+          : 0,
+        analyzedPages: overallStats.analyzedPages
+      },
+      results: results,
+      metadata: {
+        analyzedAt: new Date().toISOString(),
+        crawlSessionId
+      }
+    });
+
   } catch (error) {
-    console.error("Error generating AI SEO suggestions:", error);
-
-    // Return basic suggestions if AI fails
-    return generateFallbackSuggestions(pageData);
+    console.error("Error generating SEO suggestions:", error);
+    return res.status(500).json({ 
+      error: "Failed to generate SEO suggestions",
+      details: error.message 
+    });
   }
-}
-
-function generateFallbackSuggestions(pageData) {
-  return {
-    titleTagAnalysis: {
-      current: pageData.title,
-      suggestion: `Optimized: ${pageData.title} | ${
-        pageData.keywords[0] || "SEO"
-      } Tips`,
-    },
-    metaDescriptionAnalysis: {
-      current: pageData.metaDescription || "None",
-      suggestion: `Learn about ${pageData.keywords.join(
-        ", "
-      )} in this comprehensive guide. Improve your website's SEO and drive more traffic.`,
-    },
-    headingsAnalysis: pageData.headings.map((heading) => ({
-      selector: heading.selector,
-      level: heading.level,
-      current: heading.text,
-      suggestion: `Optimized: ${heading.text} for Better SEO`,
-    })),
-    paragraphAnalysis: pageData.paragraphs.map((para) => ({
-      selector: para.selector,
-      current: para.text,
-      suggestion: `${
-        para.text
-      } [Enhanced with keywords: ${pageData.keywords.join(", ")}]`,
-    })),
-    imageAnalysis: pageData.images.map((img) => ({
-      selector: img.selector,
-      currentAlt: img.alt || "None",
-      altSuggestion: img.alt
-        ? `${img.alt} - ${pageData.keywords[0]}`
-        : `Image of ${pageData.keywords.join(" and ")}`,
-    })),
-  };
-}
-
+};

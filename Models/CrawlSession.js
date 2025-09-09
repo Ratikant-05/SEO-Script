@@ -7,8 +7,7 @@ const CrawlSessionSchema = new mongoose.Schema({
 
   totalUrlsScraped: { type: Number, default: 0 },
   visitedUrls: [String],
-  dataIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "ScrapedData" }],
-
+  
   createdAt: { type: Date, default: Date.now }
 }, { timestamps: true });
 

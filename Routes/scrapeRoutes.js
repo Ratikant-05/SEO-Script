@@ -1,9 +1,13 @@
 import express from 'express';
 const router = express.Router();
 import {crawlSite,applySEOChanges,getSeoSuggestions} from '../Controllers/scrapeController.js'
+import { fetchCrawledData } from '../Controllers/scrapeController.js';
 
 // crawls the website
 router.post('/crawl', crawlSite)
+
+// fetching the data to the frontend
+router.get('/getData', fetchCrawledData)
 
 // getting SEO suggestions from LLM
 router.post('/getSeoSuggestions', getSeoSuggestions)

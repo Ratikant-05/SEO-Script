@@ -164,27 +164,6 @@ export const registerSiteController = async (req, res) => {
   }
 };
 
-export const getAllCrawledData =  async (req, res) => {
-  const { siteId } = req.params;
-
-  try {
-    const sessions = await CrawlSession.find({ siteId }).sort({ createdAt: -1 });
-
-    if (!sessions || sessions.length === 0) {
-      return res.status(404).json({ message: 'No crawl sessions found for this siteId.' });
-    }
-
-    res.json({
-      message: `Found ${sessions.length} crawl sessions for siteId: ${siteId}`,
-      sessions
-    });
-  } catch (error) {
-    console.error('Error fetching crawl sessions:', error);
-    res.status(500).json({ error: 'Failed to fetch crawl sessions.' });
-  }
-};
-
-
 const generateUserTokens = async (user_id)=>{
 
     const user = await User.findById(user_id)

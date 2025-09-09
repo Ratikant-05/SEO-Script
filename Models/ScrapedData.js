@@ -73,7 +73,7 @@ const ScrapedDataSchema = new mongoose.Schema({
       brandName: String
     },
     extracted: { type: Boolean, default: false },
-    timestamp: Date
+  timestamp: { type: Date, default: Date.now }
   },
 
   // Discovery & Crawl Metadata
